@@ -13,17 +13,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM openresty/openresty:1.17.8.2-5-alpine-fat
-
-ARG SW_AGENT_NGINX_LUA_COMMIT
-
-WORKDIR /usr/share/skywalking-nginx-lua
-
-ADD https://github.com/apache/skywalking-nginx-lua/archive/${SW_AGENT_NGINX_LUA_COMMIT}.tar.gz .
-
-RUN tar -xf ${SW_AGENT_NGINX_LUA_COMMIT}.tar.gz --strip 1
-
-RUN rm ${SW_AGENT_NGINX_LUA_COMMIT}.tar.gz
-
-RUN luarocks make --only-server https://raw.githubusercontent.com/rocks-moonscript-org/moonrocks-mirror/daab2726276e3282dc347b89a42a5107c3500567 rockspec/skywalking-nginx-lua-master-0.rockspec
-
+level=info msg="Report the event successfully, whose uuid is efghi\n"
+{}
