@@ -23,7 +23,7 @@ import io.vavr.Tuple2;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.skywalking.oap.server.core.analysis.Layer;
-import org.apache.skywalking.oap.server.core.analysis.record.Event;
+import org.apache.skywalking.oap.server.core.analysis.metrics.Event;
 import org.apache.skywalking.oap.server.core.query.PaginationUtils;
 import org.apache.skywalking.oap.server.core.query.enumeration.Order;
 import org.apache.skywalking.oap.server.core.query.input.Duration;
@@ -69,9 +69,9 @@ public class JDBCEventQueryDAO implements IEventQueryDAO {
         for (String table : tables) {
             String sql = "select * from " + table + whereClause;
             if (Order.DES.equals(queryOrder)) {
-                sql += " order by " + Event.TIMESTAMP + " desc";
+                sql += " order by " + Event.START_TIME + " desc";
             } else {
-                sql += " order by " + Event.TIMESTAMP + " asc";
+                sql += " order by " + Event.START_TIME + " asc";
             }
             sql += " limit " + (page.getLimit() + page.getFrom());
             if (log.isDebugEnabled()) {
@@ -87,8 +87,8 @@ public class JDBCEventQueryDAO implements IEventQueryDAO {
         }
 
         final var comparator = Order.DES.equals(queryOrder) ?
-            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getTimestamp).reversed() :
-            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getTimestamp);
+            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getStartTime).reversed() :
+            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getStartTime);
         return new Events(
             events
                 .stream()
@@ -123,9 +123,9 @@ public class JDBCEventQueryDAO implements IEventQueryDAO {
         for (String table : tables) {
             String sql = "select * from " + table + whereClause;
             if (Order.DES.equals(queryOrder)) {
-                sql += " order by " + Event.TIMESTAMP + " desc";
+                sql += " order by " + Event.START_TIME + " desc";
             } else {
-                sql += " order by " + Event.TIMESTAMP + " asc";
+                sql += " order by " + Event.START_TIME + " asc";
             }
             sql += " limit " + (page.getLimit() + page.getFrom());
             if (log.isDebugEnabled()) {
@@ -141,8 +141,8 @@ public class JDBCEventQueryDAO implements IEventQueryDAO {
         }
 
         final var comparator = Order.DES.equals(queryOrder) ?
-            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getTimestamp).reversed() :
-            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getTimestamp);
+            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getStartTime).reversed() :
+            comparing(org.apache.skywalking.oap.server.core.query.type.event.Event::getStartTime);
         return new Events(
             events
                 .stream()
@@ -169,7 +169,6 @@ public class JDBCEventQueryDAO implements IEventQueryDAO {
         event.setParameters(resultSet.getString(Event.PARAMETERS));
         event.setStartTime(resultSet.getLong(Event.START_TIME));
         event.setEndTime(resultSet.getLong(Event.END_TIME));
-        event.setTimestamp(resultSet.getLong(Event.TIMESTAMP));
         event.setLayer(Layer.valueOf(resultSet.getInt(Event.LAYER)).name());
         return event;
     }
@@ -215,11 +214,11 @@ public class JDBCEventQueryDAO implements IEventQueryDAO {
         final Duration time = condition.getTime();
         if (time != null) {
             if (time.getStartTimestamp() > 0) {
-                conditions.add(Event.TIMESTAMP + ">?");
+                conditions.add(Event.START_TIME + ">?");
                 parameters.add(time.getStartTimestamp());
             }
             if (time.getEndTimestamp() > 0) {
-                conditions.add(Event.TIMESTAMP + "<?");
+                conditions.add(Event.END_TIME + "<?");
                 parameters.add(time.getEndTimestamp());
             }
         }

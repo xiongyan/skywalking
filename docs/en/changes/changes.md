@@ -26,9 +26,6 @@
 * [Break Change]BanyanDB: Setup new Group policy.
 * Bump up commons-beanutils to 1.11.0.
 * Refactor: simplify the `Accept` http header process.
-* [Break Change]Storage: Move `event` from metrics to records.
-* Remove string limitation in Jackson deserializer for ElasticSearch client.
-* Fix `disable.oal` does not work.
 
 #### UI
 
@@ -37,9 +34,6 @@
 * Refactor: use the Fetch API to instead of Axios.
 * Support cold stage data for metrics, trace and log.
 * Add route to status API `/debugging/config/dump` in the UI.
-* Implement the Status API on Settings page.
-* Bump vite from 6.2.6 to 6.3.4.
-* Enhance async profiling by adding shorter and custom duration options.
 
 #### Documentation
 

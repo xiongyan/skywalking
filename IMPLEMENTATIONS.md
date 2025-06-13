@@ -664,6 +664,317 @@ end note
 
 This listener-based architecture allows SkyWalking to flexibly extract a wide variety of metrics and relationship data from a single trace segment.
 
+#### 2.2.4. OAP OAL Execution - Conceptual Flow
+
+The Observability Analysis Language (OAL) is a powerful feature in SkyWalking that allows users to define how metrics should be generated and aggregated from various source data (including trace spans, service calls, etc.). Due to challenges in detailed code exploration of the OAL runtime module (`oal-rt`) with available tools, the following diagram provides a high-level conceptual view of the OAL execution flow.
+
+**1. Conceptual OAL Execution Flow**
+
+This diagram illustrates the lifecycle of OAL processing, from script definition to metric persistence.
+
+```plantuml
+@startuml
+title OAP OAL Execution - Conceptual Flow
+
+package "Configuration & Setup" <<Folder>> {
+    file ".oal Scripts" as OalScripts
+    component "OAL Grammar (ANTLR)" as OalGrammar
+    component "OAL Script Parser" as OalScriptParser
+    component "OAL Engine/Runtime" as OalEngine
+}
+
+package "Data Ingestion & Initial Processing" <<Cloud>> {
+    actor Agent
+    component "OAP Receivers
+(gRPC, HTTP, Kafka)" as Receivers
+    component "TraceAnalyzer + Listeners" as TraceAnalyzer
+    component "SourceReceiver" as CoreSourceReceiver
+    queue "SourceRecord Queue" as SourceQueue
+}
+
+package "OAL Metric Generation" <<Node>> {
+    component "OAL Worker/Processor" as OalWorker
+    database "Generated Metrics
+(in-memory, e.g., Service_SLA_Metrics)" as InMemoryMetrics
+    note left of OalWorker
+      Consumes SourceRecords.
+      Matches against OAL rules.
+      Updates/aggregates metrics.
+    end note
+}
+
+package "Metric Persistence" <<Database_Storage>> {
+    component "Metrics Persistence Scheduler
+(e.g., PersistenceTimer)" as MetricsScheduler
+    component "IMetricsDAO" as MetricsDAO
+    database "Storage
+(Elasticsearch, BanyanDB, etc.)" as ActualStorage
+}
+
+OalScripts --> OalScriptParser : loaded at startup
+OalGrammar --> OalScriptParser : used by
+OalScriptParser --> OalEngine : (supplies parsed rules/AST)
+OalEngine --> OalWorker : (provides rules/context for matching)
+
+
+Agent --> Receivers : Raw Telemetry Data
+Receivers --> TraceAnalyzer : (e.g. SegmentObject)
+TraceAnalyzer --> CoreSourceReceiver : (e.g. ServiceMetric, EndpointDependency source records)
+CoreSourceReceiver --> SourceQueue : Enqueues SourceRecord
+
+SourceQueue --> OalWorker : Consumes SourceRecord (e.g., Endpoint, ServiceRelation)
+
+OalWorker -> OalEngine : Match(SourceRecord) against OAL rules
+OalEngine --> OalWorker : Matched OAL Rules & Metric Targets
+
+OalWorker -> InMemoryMetrics : Update/Aggregate Metric
+note right of InMemoryMetrics
+ Based on OAL definition:
+ e.g., for `service_sla = from(Endpoint.latency).longAvg()`
+ an Endpoint source record triggers update of
+ sum and count for the relevant service's SLA metric.
+end note
+
+MetricsScheduler -> InMemoryMetrics : Read Metrics for Persistence (periodically)
+MetricsScheduler -> MetricsDAO : save(metric)
+MetricsDAO -> ActualStorage : Store Metric
+
+@enduml
+```
+**Explanation of Conceptual Flow:**
+
+1.  **Configuration & Setup (Startup Phase):**
+    *   `.oal Scripts` containing metric definitions are read from the SkyWalking distribution (e.g., `oal-scripts` directory or bundled).
+    *   The `OAL Script Parser`, using the `OAL Grammar` (defined with ANTLR), parses these scripts into an executable format or an Abstract Syntax Tree (AST).
+    *   The `OAL Engine/Runtime` is initialized with these parsed rules. It understands the relationships between source data types (e.g., `Endpoint`, `ServiceRelation`), the metrics to be generated (e.g., `service_sla`, `endpoint_avg_latency`), and the aggregation functions to apply (e.g., `longAvg`, `sum`, `percentile`).
+
+2.  **Data Ingestion & Source Record Generation:**
+    *   Raw telemetry data is ingested by `OAP Receivers`.
+    *   Initial processing (e.g., by `TraceAnalyzer` and its listeners) converts this raw data into various fine-grained `SourceRecord`s (e.g., an `Endpoint` source record representing a call to a specific endpoint, a `ServiceRelation` source record representing a detected dependency).
+    *   These `SourceRecord`s are passed to the `SourceReceiver`.
+    *   The `SourceReceiver` enqueues these records, making them available for different stream processors, including the OAL engine.
+
+3.  **OAL Metric Generation (Runtime Processing):**
+    *   `OAL Worker/Processor` threads consume `SourceRecord`s from the queue.
+    *   For each `SourceRecord`, the worker consults the `OAL Engine`. The engine determines if this type of `SourceRecord` is used as a source in any of the loaded OAL rules.
+    *   If a match is found, the OAL worker extracts the necessary data from the `SourceRecord` as specified in the OAL rule (e.g., extracting `latency` from an `Endpoint` source).
+    *   The worker then updates the corresponding metric instance held in `InMemoryMetrics`. This involves applying the aggregation logic (e.g., for `longAvg`, it would update a running sum and count for the specific metric entity like a particular service or endpoint).
+
+4.  **Metric Persistence:**
+    *   The `InMemoryMetrics` are not persisted immediately upon every update to avoid excessive I/O.
+    *   A `Metrics Persistence Scheduler` (like the `PersistenceTimer`) runs periodically.
+    *   When triggered, it reads the current values of all aggregated metrics from `InMemoryMetrics`.
+    *   It then uses the `IMetricsDAO` (e.g., `MetricsEsDAO`) to save these aggregated metric values to the configured backend `Storage`.
+
+This flow allows SkyWalking to dynamically define and calculate a wide range of metrics from the telemetry data it collects, forming a core part of its analysis capabilities.
+
+#### 2.2.5. OAP Query Handling - Conceptual Flow
+
+The SkyWalking UI and external APIs query the OAP to retrieve telemetry data for visualization and analysis. This typically involves GraphQL queries.
+
+**1. Conceptual GraphQL Query Flow**
+
+This diagram shows a simplified sequence of how a GraphQL query from the UI is processed by the OAP, leading to data retrieval from storage.
+
+```plantuml
+@startuml
+title OAP GraphQL Query - Conceptual Flow
+
+actor UserInterface
+participant "SkyWalking UI / API Client" as Client
+participant "OAP GraphQL Endpoint
+(e.g., /graphql)" as GraphQLEndpoint
+participant "GraphQLQueryHandler
+(or similar dispatcher)" as GQLHandler
+participant "Specific Query Service
+(e.g., TraceQueryService, MetricQueryService)" as QueryService
+participant "Storage DAO
+(e.g., ITraceQueryDAO, IMetricsQueryDAO)" as StorageDAO
+database "Storage Backend
+(Elasticsearch, BanyanDB)" as Storage
+
+Client -> GraphQLEndpoint : POST /graphql (query: "...")
+activate GraphQLEndpoint
+GraphQLEndpoint -> GQLHandler : processQuery(GraphQLRequest)
+activate GQLHandler
+
+GQLHandler -> GQLHandler : parseAndValidate(query)
+note right: Uses GraphQL Java library
+to parse the query and match
+it against the OAP's GraphQL schema.
+
+GQLHandler -> QueryService : executeQueryMethod(parsedQueryArgs)
+activate QueryService
+note right of QueryService
+  The GQLHandler dispatches to a specific
+  method in a QueryService based on
+  the GraphQL query's field name.
+  (e.g., "queryTraces", "readMetrics")
+end note
+
+QueryService -> StorageDAO : fetchData(queryCriteria)
+activate StorageDAO
+note right of StorageDAO
+  QueryCriteria are derived from
+  GraphQL arguments (e.g., duration,
+  serviceId, metricName).
+end note
+StorageDAO -> Storage : executeDBQuery(nativeQuery)
+activate Storage
+Storage --> StorageDAO : DBNativeResults
+deactivate Storage
+StorageDAO -> StorageDAO : mapResultsToDomainObjects(DBNativeResults)
+StorageDAO --> QueryService : DomainData (e.g., List<TraceBrief>, List<MetricValues>)
+deactivate StorageDAO
+
+QueryService --> GQLHandler : QueryResult
+deactivate QueryService
+
+GQLHandler -> GraphQLEndpoint : formatResponse(QueryResult)
+GraphQLEndpoint --> Client : GraphQLResponse (JSON)
+deactivate GQLHandler
+deactivate GraphQLEndpoint
+
+@enduml
+```
+**Explanation of Conceptual Flow:**
+
+1.  **Query Submission:**
+    *   The `SkyWalking UI` or an external API client sends a GraphQL query to the OAP's `GraphQL Endpoint` (commonly `/graphql`).
+
+2.  **GraphQL Handling:**
+    *   The `GraphQLQueryHandler` (or a similar component responsible for GraphQL request processing) receives the request.
+    *   It uses a GraphQL library (like GraphQL Java) to parse the incoming query string, validate it against the OAP's defined GraphQL schema, and prepare it for execution. The schema defines all available query types, fields, and arguments.
+
+3.  **Dispatch to Query Service:**
+    *   Based on the fields requested in the GraphQL query, the `GraphQLQueryHandler` dispatches the request to a specific method within a relevant `QueryService`. SkyWalking has various query services for different data types, such as:
+        *   `TraceQueryService`: For trace-related queries.
+        *   `MetricQueryService`: For metrics queries.
+        *   `MetadataQueryService`: For service, instance, endpoint metadata.
+        *   `AlarmQueryService`: For alarm data.
+        *   `LogQueryService`: For log data.
+
+4.  **Data Access via DAO:**
+    *   The invoked method in the `QueryService` translates the GraphQL query arguments into specific criteria.
+    *   It then calls the appropriate `Storage DAO` (Data Access Object) to fetch the data. For example, `ITraceQueryDAO.queryBasicTraces()` or `IMetricsQueryDAO.readMetricsValues()`.
+    *   The DAO is responsible for abstracting the underlying storage mechanism.
+
+5.  **Storage Interaction:**
+    *   The `Storage DAO` constructs a native query understandable by the configured `Storage Backend` (e.g., an Elasticsearch query, a BanyanDB query, or an SQL query).
+    *   The query is executed against the storage.
+    *   The native results from the database are returned to the DAO.
+
+6.  **Result Mapping & Return:**
+    *   The `Storage DAO` maps the native database results into SkyWalking's internal domain objects (e.g., `TraceBrief`, `MetricValues`).
+    *   These domain objects are returned to the `QueryService`.
+    *   The `QueryService` returns this data to the `GraphQLQueryHandler`.
+
+7.  **Response Formatting:**
+    *   The `GraphQLQueryHandler` takes the data returned by the query service and formats it into a standard GraphQL JSON response, matching the structure requested in the original query.
+    *   This JSON response is sent back to the client.
+
+This flow ensures that queries are handled in a structured way, leveraging the power of GraphQL for flexible data retrieval while abstracting the specifics of the storage backend. The OAP's GraphQL schema serves as the contract for all queryable data.
+
+#### 2.2.6. OAP Alarming Engine - Conceptual Flow
+
+The OAP includes an alarming engine that checks incoming telemetry data against user-defined rules and triggers alerts if conditions are met.
+
+**1. Conceptual Alarming Flow**
+
+This diagram outlines the general process of how alarms are defined, how data is checked, and how notifications are sent.
+
+```plantuml
+@startuml
+title OAP Alarming Engine - Conceptual Flow
+
+package "Configuration" <<Folder>> {
+    file "alarm-settings.yml" as AlarmRulesConfig
+    note bottom of AlarmRulesConfig
+      Defines alarm rules, including:
+      - Metric name (e.g., service_sla, endpoint_percentile)
+      - Scope (Service, Endpoint, Instance)
+      - Threshold
+      - Operator (>, <, >=, <=)
+      - Period (how long to check)
+      - Count (how many times threshold must be breached)
+      - Silence period
+      - Webhook URLs for notification
+    end note
+}
+
+package "OAP Core Processing" <<Cloud>> {
+    component "AlarmRuleLoader" as RuleLoader
+    component "AlarmCheckerScheduler" as CheckerScheduler
+    component "MetricQueryService / DAO" as MetricReader
+    database "Storage (Metrics)" as MetricsStorage
+    component "AlarmCore" as AlarmCoreEngine
+    queue "AlarmRecordQueue" as AlarmQueue
+}
+
+package "Alarm Notification" <<Node>> {
+    component "WebhookNotifier" as WebhookNotifier
+    actor "External System" as ExternalSystem
+}
+
+AlarmRulesConfig --> RuleLoader : Loads rules at startup / periodically
+RuleLoader --> AlarmCoreEngine : Updates active alarm rules
+
+CheckerScheduler -> AlarmCoreEngine : triggerChecks() (periodically for each rule)
+activate AlarmCoreEngine
+
+AlarmCoreEngine -> MetricReader : queryMetrics(rule.metricName, rule.scope, timeWindow)
+activate MetricReader
+MetricReader -> MetricsStorage : fetch relevant metrics
+MetricsStorage --> MetricReader : metricValues
+MetricReader --> AlarmCoreEngine : metricValues
+deactivate MetricReader
+
+AlarmCoreEngine -> AlarmCoreEngine : evaluateRule(metricValues, rule)
+note right
+  - Checks if metric value breaches threshold.
+  - Considers period, count, silence period.
+  - If rule is triggered => Generate AlarmRecord
+end note
+
+alt if alarm rule triggered AND not silenced
+    AlarmCoreEngine -> AlarmQueue : enqueue(AlarmRecord)
+end
+
+deactivate AlarmCoreEngine
+
+AlarmQueue --> WebhookNotifier : consumes AlarmRecord
+activate WebhookNotifier
+WebhookNotifier -> ExternalSystem : sendAlarmNotification(WebhookURL, AlarmRecord)
+deactivate WebhookNotifier
+
+@enduml
+```
+**Explanation of Conceptual Flow:**
+
+1.  **Configuration:**
+    *   Alarm rules are defined in `alarm-settings.yml` (or a similar configuration file). These rules specify the metric to monitor, the scope (e.g., service, endpoint, instance), threshold, comparison operator, duration of observation (period), number of times the threshold must be breached (count), and notification details (like webhook URLs).
+    *   The `AlarmRuleLoader` reads these rules when the OAP starts and may periodically refresh them.
+
+2.  **Scheduled Checking:**
+    *   The `AlarmCheckerScheduler` periodically triggers the `AlarmCoreEngine` to evaluate active alarm rules. This is not necessarily tied to individual data points coming in but rather runs at defined intervals for each rule.
+
+3.  **Metric Retrieval:**
+    *   For each rule being checked, the `AlarmCoreEngine` uses a `MetricQueryService` (or directly a metrics DAO) to fetch the relevant metric data from the `MetricsStorage`. The query will specify the metric name, scope ID (e.g., specific service ID), and the time window defined by the rule's `period`.
+
+4.  **Rule Evaluation:**
+    *   The `AlarmCoreEngine` evaluates the retrieved metric values against the conditions defined in the alarm rule:
+        *   It compares the metric value against the `threshold` using the specified `operator`.
+        *   It checks if this condition has persisted for the required `period` and `count`.
+        *   It also considers any `silence period` to prevent flapping alerts.
+    *   If all conditions for an alarm are met, an `AlarmRecord` is generated.
+
+5.  **Alarm Queuing & Notification:**
+    *   The generated `AlarmRecord` (containing details about the alarm, the triggering metric, and its value) is enqueued into an `AlarmRecordQueue`.
+    *   Dedicated notifier components, like the `WebhookNotifier`, consume `AlarmRecord`s from this queue.
+    *   The `WebhookNotifier` sends a notification (e.g., an HTTP POST request with alarm details in JSON format) to the configured webhook URL(s), allowing integration with external alerting systems or messaging platforms.
+
+This conceptual flow enables SkyWalking to proactively monitor metrics and alert users or systems when predefined conditions indicate potential issues. The separation of concerns (rule loading, scheduled checking, metric querying, rule evaluation, and notification) allows for a flexible and robust alarming system.
+
 ### 2.3. Storage
 
 SkyWalking requires a storage solution to persist the telemetry data processed by the OAP. The storage component is designed to be pluggable, allowing users to choose a backend that best fits their operational needs and existing infrastructure. SkyWalking provides official support for several storage options:

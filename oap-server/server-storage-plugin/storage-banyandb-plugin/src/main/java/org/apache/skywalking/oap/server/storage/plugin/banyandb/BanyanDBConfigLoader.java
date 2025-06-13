@@ -70,7 +70,7 @@ public class BanyanDBConfigLoader {
                 moduleProvider.name()
             );
             Properties groups = configProperties.get("groups");
-            Properties recordsNormal = (Properties) groups.get(BanyanDB.StreamGroup.RECORDS.getName());
+            Properties recordsNormal = (Properties) groups.get("recordsNormal");
             copyProperties(
                 config.getRecordsNormal(), recordsNormal,
                 moduleProvider.getModule().name(), moduleProvider.name()
@@ -105,7 +105,7 @@ public class BanyanDBConfigLoader {
             );
             copyStages(browserErrorLog, config.getRecordsBrowserErrorLog());
 
-            Properties metricsMin = (Properties) groups.get(BanyanDB.MeasureGroup.METRICS_MINUTE.getName());
+            Properties metricsMin = (Properties) groups.get(BanyanDB.MeasureGroup.METRICS_MIN.getName());
             copyProperties(
                 config.getMetricsMin(), metricsMin,
                 moduleProvider.getModule().name(), moduleProvider.name()
