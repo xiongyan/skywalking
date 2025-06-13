@@ -148,6 +148,7 @@ TraceQueryEsDAO ..> ElasticSearchConverter.ToEntity : uses
 ```
 
 **Explanation:**
+*   This diagram shows the relationship between core SkyWalking storage DAO (Data Access Object) interfaces and their typical implementations in various storage plugins, such as those for Elasticsearch or MySQL. It highlights the abstraction layer that allows SkyWalking to support multiple backend storages.
 *   **Core Interfaces:** Define the contracts for storage operations (e.g., `StorageDAO` as a factory, `IBatchDAO` for batch writes, `IRecordDAO` for record-specific operations, `ITraceQueryDAO` for trace queries).
 *   **`Model`:** Represents the data schema, adaptable for different backends via extensions.
 *   **`StorageBuilder` & `Converter`s:** Responsible for translating between SkyWalking's internal entity format and the format required by the specific storage backend.
